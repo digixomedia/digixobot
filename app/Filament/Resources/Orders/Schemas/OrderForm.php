@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Orders\Schemas;
 
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Select;
 use Filament\Schemas\Schema;
 
 class OrderForm
@@ -14,17 +15,18 @@ class OrderForm
             ->components([
                 TextInput::make('customer_id')
                     ->required()
-                    ->numeric(),
+                    ->numeric()->disabled(),
                 TextInput::make('order_number')
-                    ->required(),
-                TextInput::make('status')
-                    ->required()
-                    ->default('paid'),
+                    ->required()->disabled(),
+                Select::make('status')->options([
+                    'paid' => 'Paid', 'processing' => 'Processing', 'delivered' => 'Delivered',
+                    'cancelled' => 'Cancelled', 'refunded' => 'Refunded', 'failed' => 'Failed',
+                ])->required(),
                 TextInput::make('total_paise')
                     ->required()
-                    ->numeric(),
+                    ->numeric()->disabled(),
                 TextInput::make('purchase_key')
-                    ->required(),
+                    ->required()->disabled(),
                 DateTimePicker::make('paid_at'),
                 DateTimePicker::make('delivered_at'),
             ]);

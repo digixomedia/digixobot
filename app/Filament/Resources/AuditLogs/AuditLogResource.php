@@ -2,8 +2,6 @@
 
 namespace App\Filament\Resources\AuditLogs;
 
-use App\Filament\Resources\AuditLogs\Pages\CreateAuditLog;
-use App\Filament\Resources\AuditLogs\Pages\EditAuditLog;
 use App\Filament\Resources\AuditLogs\Pages\ListAuditLogs;
 use App\Filament\Resources\AuditLogs\Schemas\AuditLogForm;
 use App\Filament\Resources\AuditLogs\Tables\AuditLogsTable;
@@ -41,8 +39,6 @@ class AuditLogResource extends Resource
     {
         return [
             'index' => ListAuditLogs::route('/'),
-            'create' => CreateAuditLog::route('/create'),
-            'edit' => EditAuditLog::route('/{record}/edit'),
         ];
     }
 }

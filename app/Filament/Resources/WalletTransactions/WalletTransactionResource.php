@@ -2,8 +2,6 @@
 
 namespace App\Filament\Resources\WalletTransactions;
 
-use App\Filament\Resources\WalletTransactions\Pages\CreateWalletTransaction;
-use App\Filament\Resources\WalletTransactions\Pages\EditWalletTransaction;
 use App\Filament\Resources\WalletTransactions\Pages\ListWalletTransactions;
 use App\Filament\Resources\WalletTransactions\Schemas\WalletTransactionForm;
 use App\Filament\Resources\WalletTransactions\Tables\WalletTransactionsTable;
@@ -41,8 +39,6 @@ class WalletTransactionResource extends Resource
     {
         return [
             'index' => ListWalletTransactions::route('/'),
-            'create' => CreateWalletTransaction::route('/create'),
-            'edit' => EditWalletTransaction::route('/{record}/edit'),
         ];
     }
 }

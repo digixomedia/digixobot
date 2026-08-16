@@ -16,22 +16,29 @@ class CustomerForm
                 TextInput::make('telegram_id')
                     ->tel()
                     ->required()
-                    ->numeric(),
+                    ->numeric()
+                    ->disabled(),
                 TextInput::make('telegram_username')
                     ->tel()
-                    ->default(null),
+                    ->default(null)
+                    ->disabled(),
                 TextInput::make('name')
                     ->default(null),
                 TextInput::make('customer_number')
-                    ->required(),
+                    ->required()
+                    ->disabled(),
                 TextInput::make('wallet_balance_paise')
                     ->required()
                     ->numeric()
-                    ->default(0),
+                    ->default(0)
+                    ->disabled()
+                    ->dehydrated(false),
                 TextInput::make('total_spend_paise')
                     ->required()
                     ->numeric()
-                    ->default(0),
+                    ->default(0)
+                    ->disabled()
+                    ->dehydrated(false),
                 Textarea::make('internal_notes')
                     ->default(null)
                     ->columnSpanFull(),
