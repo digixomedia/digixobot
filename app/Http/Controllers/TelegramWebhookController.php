@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use App\Services\TelegramBot;
 
 class TelegramWebhookController extends Controller
 {
@@ -24,8 +25,62 @@ class TelegramWebhookController extends Controller
             return response()->noContent(); // Telegram retries are deliberately idempotent.
         }
 
-        // Message and callback dispatch will be added here; acknowledge promptly to avoid Telegram retries.
+        $message = $request->input('message');
+        if (is_array($message) && isset($message['chat']['id'])) {
+            $this->handleMessage($message);
+        }
+
         DB::table('telegram_updates')->where('update_id', $updateId)->update(['processed_at' => now()]);
         return response()->noContent();
+    }
+
+    private function handleMessage(array $message): void
+    {
+        $chatId = (int) $message['chat']['id'];
+        $from = $message['from'] ?? [];
+        $text = trim((string) ($message['text'] ?? ''));
+        $customer = DB::table('customers')->where('telegram_id', $chatId)->first();
+
+        if (! $customer) {
+            $customerId = DB::table('customers')->insertGetId([
+                'telegram_id' => $chatId,
+                'telegram_username' => $from['username'] ?? null,
+                'name' => trim(($from['first_name'] ?? '').' '.($from['last_name'] ?? '')) ?: null,
+                'customer_number' => 'DXO-'.str_pad((string) $chatId, 10, '0', STR_PAD_LEFT),
+                'last_activity_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $customer = DB::table('customers')->find($customerId);
+        } else {
+            DB::table('customers')->where('id', $customer->id)->update([
+                'telegram_username' => $from['username'] ?? $customer->telegram_username,
+                'name' => trim(($from['first_name'] ?? '').' '.($from['last_name'] ?? '')) ?: $customer->name,
+                'last_activity_at' => now(), 'updated_at' => now(),
+            ]);
+            $customer = DB::table('customers')->find($customer->id);
+        }
+
+        if (str_starts_with($text, '/start') || $text === '/shop' || $text === '/categories') {
+            app(TelegramBot::class)->sendMessage($chatId, $this->mainMenu($customer), $this->menuKeyboard());
+        }
+    }
+
+    private function mainMenu(object $customer): string
+    {
+        $orders = DB::table('orders')->where('customer_id', $customer->id)->count();
+        $name = TelegramBot::escape($customer->name ?: 'Customer');
+        return "<b>Welcome to DigiXO Store, {$name}</b>\n\n"
+            ."<b>Customer ID:</b> <code>{$customer->customer_number}</code>\n"
+            ."<b>Wallet balance:</b> ₹".number_format($customer->wallet_balance_paise / 100, 2)."\n"
+            ."<b>Orders:</b> {$orders}\n\nChoose an option below.";
+    }
+
+    private function menuKeyboard(): array
+    {
+        return [
+            [['text' => '🛍️ Shop Now', 'callback_data' => 'shop'], ['text' => '📂 Categories', 'callback_data' => 'categories']],
+            [['text' => '🔍 Search Products', 'callback_data' => 'search'], ['text' => '📦 My Orders', 'callback_data' => 'orders']],
+            [['text' => '💰 My Wallet', 'callback_data' => 'wallet'], ['text' => '🎯 Today’s Deals', 'callback_data' => 'deals']],
+            [['text' => '👤 My Account', 'callback_data' => 'account'], ['text' => '💬 Help & Support', 'callback_data' => 'support']],
+        ];
     }
 }
