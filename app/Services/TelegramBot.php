@@ -16,6 +16,11 @@ class TelegramBot
         Http::timeout(10)->post('https://api.telegram.org/bot'.config('services.telegram.bot_token').'/sendMessage', $payload)->throw();
     }
 
+    public function answerCallback(string $callbackId): void
+    {
+        Http::timeout(10)->post('https://api.telegram.org/bot'.config('services.telegram.bot_token').'/answerCallbackQuery', ['callback_query_id' => $callbackId])->throw();
+    }
+
     public static function escape(string $value): string
     {
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
