@@ -64,6 +64,26 @@ class TelegramWebhookController extends Controller
 
         if (str_starts_with($text, '/start') || $text === '/shop' || $text === '/categories') {
             app(TelegramBot::class)->sendMessage($chatId, $this->mainMenu($customer), $this->menuKeyboard());
+            return;
+        }
+
+        $bot = app(TelegramBot::class);
+        if ($text === '/orders') {
+            $bot->sendMessage($chatId, $this->ordersText($customer), [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+        } elseif ($text === '/wallet') {
+            $bot->sendMessage($chatId, $this->walletText($customer), [[['text' => '➕ Add Balance', 'url' => 'https://t.me/digixostore'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+        } elseif ($text === '/account') {
+            $bot->sendMessage($chatId, $this->accountText($customer), [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+        } elseif ($text === '/support') {
+            $bot->sendMessage($chatId, '<b>Help & Support</b>\n\nContact @digixostore and include your customer ID: <code>'.$customer->customer_number.'</code>.', [[['text' => '💬 Contact Support', 'url' => 'https://t.me/digixostore'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+        } elseif ($text === '/terms') {
+            $bot->sendMessage($chatId, '<b>Terms</b>\n\nDigital products are fulfilled according to the plan conditions shown before purchase. Contact support before buying if you need clarification. Eligible refunds are credited back to the DigiXO wallet.', [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+        } elseif (str_starts_with($text, '/search ')) {
+            $query = trim(substr($text, 8));
+            $products = DB::table('products')->where('is_active', true)->where('name', 'like', '%'.$query.'%')->orderBy('display_order')->limit(10)->get();
+            $buttons = $products->map(fn ($product) => [['text' => '🛍️ '.$product->name, 'callback_data' => 'product:'.$product->id]])->all();
+            $buttons[] = [['text' => '⌂ Main Menu', 'callback_data' => 'home']];
+            $bot->sendMessage($chatId, $products->isEmpty() ? 'No matching products found.' : '<b>Search results</b>', $buttons);
         }
     }
 
@@ -100,9 +120,32 @@ class TelegramWebhookController extends Controller
         }
 
         if ($data === 'wallet') {
-            $bot->sendMessage($chatId, "<b>My Wallet</b>\n\nCurrent balance: <b>₹".number_format($customer->wallet_balance_paise / 100, 2)."</b>\n\nTo add balance, contact @digixostore and share your customer ID: <code>{$customer->customer_number}</code>.", [
+            $bot->sendMessage($chatId, $this->walletText($customer), [
                 [['text' => '➕ Add Balance', 'url' => 'https://t.me/digixostore'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']],
             ]);
+            return;
+        }
+        if ($data === 'orders') {
+            $bot->sendMessage($chatId, $this->ordersText($customer), [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+            return;
+        }
+        if ($data === 'account') {
+            $bot->sendMessage($chatId, $this->accountText($customer), [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+            return;
+        }
+        if ($data === 'support') {
+            DB::table('support_requests')->insert(['customer_id' => $customer->id, 'message' => 'Customer requested Telegram support.', 'status' => 'open', 'created_at' => now(), 'updated_at' => now()]);
+            $bot->sendMessage($chatId, '<b>Support request recorded</b>\n\nYou can also contact @digixostore and share customer ID <code>'.$customer->customer_number.'</code>.', [[['text' => '💬 Contact Support', 'url' => 'https://t.me/digixostore'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+            return;
+        }
+        if ($data === 'search') {
+            $bot->sendMessage($chatId, '<b>Search Products</b>\n\nSend <code>/search product name</code>.', [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+            return;
+        }
+        if ($data === 'deals') {
+            $deals = DB::table('deals')->join('plans', 'plans.id', '=', 'deals.plan_id')->where('deals.is_active', true)->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', now()))->where(fn ($q) => $q->whereNull('ends_at')->orWhere('ends_at', '>=', now()))->select('deals.*', 'plans.name as plan_name')->limit(10)->get();
+            $text = $deals->isEmpty() ? 'No active deals today.' : '<b>Today’s Deals</b>\n\n'.$deals->map(fn ($deal) => '• '.TelegramBot::escape($deal->title).' — ₹'.number_format($deal->deal_price_paise / 100, 2))->implode("\n");
+            $bot->sendMessage($chatId, $text, [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
             return;
         }
         if ($data === 'home') {
@@ -166,5 +209,22 @@ class TelegramWebhookController extends Controller
                 $bot->sendMessage($chatId, TelegramBot::escape($exception->getMessage()), [[['text' => '💰 Add Balance', 'callback_data' => 'wallet'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
             }
         }
+    }
+
+    private function walletText(object $customer): string
+    {
+        return "<b>My Wallet</b>\n\nCurrent balance: <b>₹".number_format($customer->wallet_balance_paise / 100, 2)."</b>\n\nTo add balance, contact @digixostore and share your customer ID: <code>{$customer->customer_number}</code>.";
+    }
+
+    private function accountText(object $customer): string
+    {
+        return '<b>My Account</b>\n\nName: '.TelegramBot::escape($customer->name ?: 'Customer').'\nCustomer ID: <code>'.$customer->customer_number.'</code>\nRegistered: '.$customer->created_at;
+    }
+
+    private function ordersText(object $customer): string
+    {
+        $orders = DB::table('orders')->where('customer_id', $customer->id)->latest()->limit(10)->get();
+        if ($orders->isEmpty()) { return '<b>My Orders</b>\n\nYou have no orders yet.'; }
+        return '<b>My Orders</b>\n\n'.$orders->map(fn ($order) => '<code>'.TelegramBot::escape($order->order_number).'</code> — '.TelegramBot::escape(ucfirst($order->status)).' — ₹'.number_format($order->total_paise / 100, 2))->implode("\n");
     }
 }
