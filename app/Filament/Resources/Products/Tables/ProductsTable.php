@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Products\Tables;
 
 use App\Models\Product;
+use App\Services\TelegramBot;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\IconColumn;
@@ -58,6 +59,14 @@ class ProductsTable
                             $planCopy->is_active = false;
                             $planCopy->save();
                         }
+                    }),
+                Action::make('previewTelegram')
+                    ->label('Telegram Preview')
+                    ->action(function (Product $record): void {
+                        $plans = $record->plans()->where('is_active', true)->orderBy('display_order')->get();
+                        $text = '<b>'.TelegramBot::escape($record->name).'</b>\n<blockquote>'.TelegramBot::escape($record->description ?: 'Digital product.').'</blockquote>\n\n'
+                            .$plans->map(fn ($plan) => '• '.TelegramBot::escape($plan->name).' · '.TelegramBot::escape($plan->validity).' · ₹'.number_format($plan->price_paise / 100, 2))->implode("\n");
+                        app(TelegramBot::class)->notifyAdmin($text);
                     }),
                 EditAction::make(),
             ])

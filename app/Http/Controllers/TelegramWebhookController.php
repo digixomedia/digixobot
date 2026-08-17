@@ -41,6 +41,11 @@ class TelegramWebhookController extends Controller
         } catch (\Throwable $exception) {
             DB::table('telegram_updates')->where('update_id', $updateId)->delete();
             report($exception);
+            try {
+                app(TelegramBot::class)->notifyAdmin('<b>Bot processing error</b>\n\nUpdate: <code>'.$updateId.'</code>\nError: '.TelegramBot::escape((string) str($exception->getMessage())->limit(300)));
+            } catch (\Throwable) {
+                // Logging remains the fallback when Telegram itself is unavailable.
+            }
             return response('Temporary processing failure.', 500);
         }
         return response()->noContent();
@@ -177,21 +182,19 @@ class TelegramWebhookController extends Controller
             return;
         }
         if ($data === 'categories' || $data === 'shop') {
-            $categories = DB::table('categories')->where('is_active', true)->orderBy('display_order')->limit(10)->get();
-            if ($categories->isEmpty()) {
-                $bot->sendMessage($chatId, 'No categories are available yet. Please check back soon.', [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
-                return;
-            }
-            $buttons = $categories->map(fn ($category) => [['text' => '📂 '.$category->name, 'callback_data' => 'category:'.$category->id]])->all();
-            $buttons[] = [['text' => '⌂ Main Menu', 'callback_data' => 'home']];
-            $bot->sendMessage($chatId, '<b>Shop by Category</b>\n\nChoose a category:', $buttons);
+            $this->sendCategoriesPage($chatId, 0);
+            return;
+        }
+        if (preg_match('/^categories_page:(\d+)$/', $data, $matches)) {
+            $this->sendCategoriesPage($chatId, (int) $matches[1]);
             return;
         }
         if (preg_match('/^category:(\d+)$/', $data, $matches)) {
-            $products = DB::table('products')->where('category_id', $matches[1])->where('is_active', true)->orderBy('display_order')->limit(10)->get();
-            $buttons = $products->map(fn ($product) => [['text' => '🛍️ '.$product->name, 'callback_data' => 'product:'.$product->id]])->all();
-            $buttons[] = [['text' => '‹ Categories', 'callback_data' => 'categories'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']];
-            $bot->sendMessage($chatId, $products->isEmpty() ? 'No products are available in this category.' : '<b>Choose a product</b>', $buttons);
+            $this->sendProductsPage($chatId, (int) $matches[1], 0);
+            return;
+        }
+        if (preg_match('/^products_page:(\d+):(\d+)$/', $data, $matches)) {
+            $this->sendProductsPage($chatId, (int) $matches[1], (int) $matches[2]);
             return;
         }
         if (preg_match('/^product:(\d+)$/', $data, $matches)) {
@@ -216,7 +219,34 @@ class TelegramWebhookController extends Controller
                 ."\n<b>Warranty:</b> ".TelegramBot::escape($plan->warranty ?: 'As stated by seller')
                 ."\n<b>Price:</b> ₹".number_format($this->effectivePrice((int) $plan->id, (int) $plan->price_paise) / 100, 2)
                 ."\n<b>Stock:</b> ".($plan->stock > 0 ? $plan->stock.' available' : 'Sold out');
-            $bot->sendMessage($chatId, $text, [[['text' => '⚡ Buy Now', 'callback_data' => 'buy:'.$plan->id]], [['text' => '‹ Other Plans', 'callback_data' => 'product:'.$plan->product_id], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+            $bot->sendMessage($chatId, $text, [
+                [['text' => '⚡ Buy Now', 'callback_data' => 'buy:'.$plan->id]],
+                [['text' => '📋 Full Details', 'callback_data' => 'details:'.$plan->id], ['text' => '💬 Ask a Question', 'callback_data' => 'ask:'.$plan->id]],
+                [['text' => '‹ Other Plans', 'callback_data' => 'product:'.$plan->product_id], ['text' => '⌂ Main Menu', 'callback_data' => 'home']],
+            ]);
+            return;
+        }
+        if (preg_match('/^details:(\d+)$/', $data, $matches)) {
+            $plan = DB::table('plans')->join('products', 'products.id', '=', 'plans.product_id')->select('plans.*', 'products.name as product_name', 'products.description as product_description')->where('plans.id', $matches[1])->first();
+            if (! $plan) { return; }
+            $text = '<b>'.TelegramBot::escape($plan->product_name).' — '.TelegramBot::escape($plan->name).'</b>'
+                .'\n\n<blockquote>'.TelegramBot::escape($plan->product_description ?: 'Digital product plan.').'</blockquote>'
+                .'\n<b>Validity:</b> '.TelegramBot::escape($plan->validity)
+                .'\n<b>Delivery method:</b> '.TelegramBot::escape($plan->delivery_method ?: 'Contact support')
+                .'\n<b>Delivery estimate:</b> '.TelegramBot::escape($plan->delivery_estimate ?: 'Contact support')
+                .'\n<b>Activation:</b> '.TelegramBot::escape($plan->activation_method ?: 'Provided after purchase')
+                .'\n<b>Warranty:</b> '.TelegramBot::escape($plan->warranty ?: 'As stated by seller')
+                .'\n<b>Stock:</b> '.($plan->stock > 0 ? $plan->stock.' available' : 'Sold out')
+                .'\n<b>Conditions:</b> '.TelegramBot::escape($plan->conditions ?: 'No additional conditions.')
+                .'\n<b>Price:</b> ₹'.number_format($this->effectivePrice((int) $plan->id, (int) $plan->price_paise) / 100, 2);
+            $bot->sendMessage($chatId, $text, [[['text' => '⚡ Buy Now', 'callback_data' => 'buy:'.$plan->id]], [['text' => '‹ Plan', 'callback_data' => 'plan:'.$plan->id], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+            return;
+        }
+        if (preg_match('/^ask:(\d+)$/', $data, $matches)) {
+            $plan = DB::table('plans')->find($matches[1]);
+            DB::table('support_requests')->insert(['customer_id' => $customer->id, 'message' => 'Question about plan #'.(int) $matches[1].($plan ? ' ('.$plan->name.')' : ''), 'status' => 'open', 'created_at' => now(), 'updated_at' => now()]);
+            $bot->notifyAdmin('<b>New product question</b>\n\nCustomer: <code>'.TelegramBot::escape($customer->customer_number).'</code>\nPlan ID: <code>'.(int) $matches[1].'</code>');
+            $bot->sendMessage($chatId, '<b>Question recorded</b>\n\nContact @'.$this->supportUsername().' and mention your customer ID <code>'.$customer->customer_number.'</code>.', [[['text' => '💬 Open Support', 'url' => 'https://t.me/'.$this->supportUsername()], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
             return;
         }
         if (preg_match('/^buy:(\d+)$/', $data, $matches)) {
@@ -234,7 +264,15 @@ class TelegramWebhookController extends Controller
                 $bot->sendMessage($chatId, '<b>Payment successful</b>\n\nOrder <code>'.TelegramBot::escape($order->order_number).'</code> is now in the fulfilment queue.', [[['text' => '📦 My Orders', 'callback_data' => 'orders'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
                 $bot->notifyAdmin('<b>New paid order</b>\n\nOrder: <code>'.TelegramBot::escape($order->order_number).'</code>\nCustomer: <code>'.TelegramBot::escape($customer->customer_number).'</code>\nTotal: <b>₹'.number_format($order->total_paise / 100, 2).'</b>');
             } catch (\RuntimeException $exception) {
-                $bot->sendMessage($chatId, TelegramBot::escape($exception->getMessage()), [[['text' => '💰 Add Balance', 'callback_data' => 'wallet'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+                $message = $exception->getMessage();
+                if ($message === 'Insufficient wallet balance.') {
+                    $plan = DB::table('plans')->find((int) $matches[1]);
+                    $freshCustomer = DB::table('customers')->find($customer->id);
+                    $price = $plan ? $this->effectivePrice((int) $plan->id, (int) $plan->price_paise) : 0;
+                    $shortfall = max(0, $price - (int) $freshCustomer->wallet_balance_paise);
+                    $message = 'Insufficient wallet balance. Required shortfall: ₹'.number_format($shortfall / 100, 2).'.';
+                }
+                $bot->sendMessage($chatId, TelegramBot::escape($message), [[['text' => '💰 Add Balance', 'callback_data' => 'wallet'], ['text' => '💬 Support', 'url' => 'https://t.me/'.$this->supportUsername()]], [['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
             }
         }
     }
@@ -261,6 +299,7 @@ class TelegramWebhookController extends Controller
         return [
             [['text' => '➕ Add Balance', 'url' => 'https://t.me/'.$this->supportUsername()]],
             [['text' => '📒 Transactions', 'callback_data' => 'transactions'], ['text' => '↩ Refunds', 'callback_data' => 'refunds']],
+            [['text' => '💬 Contact Support', 'url' => 'https://t.me/'.$this->supportUsername()]],
             [['text' => '⌂ Main Menu', 'callback_data' => 'home']],
         ];
     }
@@ -282,5 +321,33 @@ class TelegramWebhookController extends Controller
             ->where(fn ($query) => $query->whereNull('ends_at')->orWhere('ends_at', '>=', now()))
             ->min('deal_price_paise');
         return $dealPrice === null ? $regularPrice : min((int) $dealPrice, $regularPrice);
+    }
+
+    private function sendCategoriesPage(int $chatId, int $page): void
+    {
+        $page = max(0, $page); $perPage = 8;
+        $categories = DB::table('categories')->where('is_active', true)->orderBy('display_order')->orderBy('id')->offset($page * $perPage)->limit($perPage + 1)->get();
+        $hasNext = $categories->count() > $perPage; $categories = $categories->take($perPage);
+        $buttons = $categories->map(fn ($category) => [['text' => '📂 '.$category->name, 'callback_data' => 'category:'.$category->id]])->all();
+        $navigation = [];
+        if ($page > 0) { $navigation[] = ['text' => '‹ Previous', 'callback_data' => 'categories_page:'.($page - 1)]; }
+        if ($hasNext) { $navigation[] = ['text' => 'Next ›', 'callback_data' => 'categories_page:'.($page + 1)]; }
+        if ($navigation !== []) { $buttons[] = $navigation; }
+        $buttons[] = [['text' => '⌂ Main Menu', 'callback_data' => 'home']];
+        app(TelegramBot::class)->sendMessage($chatId, $categories->isEmpty() ? 'No categories are available yet.' : '<b>Shop by Category</b>\n\nChoose a category:', $buttons);
+    }
+
+    private function sendProductsPage(int $chatId, int $categoryId, int $page): void
+    {
+        $page = max(0, $page); $perPage = 8;
+        $products = DB::table('products')->where('category_id', $categoryId)->where('is_active', true)->orderBy('display_order')->orderBy('id')->offset($page * $perPage)->limit($perPage + 1)->get();
+        $hasNext = $products->count() > $perPage; $products = $products->take($perPage);
+        $buttons = $products->map(fn ($product) => [['text' => '🛍️ '.$product->name, 'callback_data' => 'product:'.$product->id]])->all();
+        $navigation = [];
+        if ($page > 0) { $navigation[] = ['text' => '‹ Previous', 'callback_data' => 'products_page:'.$categoryId.':'.($page - 1)]; }
+        if ($hasNext) { $navigation[] = ['text' => 'Next ›', 'callback_data' => 'products_page:'.$categoryId.':'.($page + 1)]; }
+        if ($navigation !== []) { $buttons[] = $navigation; }
+        $buttons[] = [['text' => '‹ Categories', 'callback_data' => 'categories'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']];
+        app(TelegramBot::class)->sendMessage($chatId, $products->isEmpty() ? 'No products are available in this category.' : '<b>Choose a product</b>', $buttons);
     }
 }

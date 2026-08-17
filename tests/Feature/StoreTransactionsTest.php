@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Services\PurchaseService;
 use App\Services\RefundService;
+use App\Services\WalletService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -69,5 +70,27 @@ class StoreTransactionsTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         app(RefundService::class)->refund($order, 'Duplicate attempt', null);
+    }
+
+    public function test_active_deal_price_is_used_for_purchase(): void
+    {
+        [$customerId, $planId] = $this->seedStore();
+        DB::table('deals')->insert(['plan_id' => $planId, 'title' => 'Test deal', 'deal_price_paise' => 1800, 'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $orderId = app(PurchaseService::class)->purchase($customerId, $planId, 'deal-purchase');
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'total_paise' => 1800]);
+        $this->assertDatabaseHas('customers', ['id' => $customerId, 'wallet_balance_paise' => 8200]);
+    }
+
+    public function test_wallet_adjustments_are_ledgered_and_never_make_balance_negative(): void
+    {
+        Http::fake();
+        [$customerId] = $this->seedStore();
+        $customer = Customer::find($customerId);
+        app(WalletService::class)->adjust($customer, 500, 'promotional_credit', 'Welcome bonus', null);
+        $this->assertDatabaseHas('wallet_transactions', ['customer_id' => $customerId, 'type' => 'promotional_credit', 'amount_paise' => 500]);
+        $this->assertDatabaseHas('customers', ['id' => $customerId, 'wallet_balance_paise' => 10500]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        app(WalletService::class)->adjust($customer, -20000, 'admin_correction', 'Invalid correction', null);
     }
 }
