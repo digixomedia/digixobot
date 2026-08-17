@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Plans\Schemas;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\Select;
 use Filament\Schemas\Schema;
 
 class PlanForm
@@ -13,9 +14,9 @@ class PlanForm
     {
         return $schema
             ->components([
-                TextInput::make('product_id')
-                    ->required()
-                    ->numeric(),
+                Select::make('product_id')
+                    ->relationship('product', 'name')
+                    ->searchable()->preload()->required(),
                 TextInput::make('name')
                     ->required(),
                 TextInput::make('validity')

@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Products\Schemas;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\Select;
 use Filament\Schemas\Schema;
 
 class ProductForm
@@ -13,13 +14,13 @@ class ProductForm
     {
         return $schema
             ->components([
-                TextInput::make('category_id')
-                    ->required()
-                    ->numeric(),
+                Select::make('category_id')
+                    ->relationship('category', 'name')
+                    ->searchable()->preload()->required(),
                 TextInput::make('name')
                     ->required(),
                 TextInput::make('slug')
-                    ->required(),
+                    ->required()->unique(ignoreRecord: true),
                 Textarea::make('description')
                     ->default(null)
                     ->columnSpanFull(),

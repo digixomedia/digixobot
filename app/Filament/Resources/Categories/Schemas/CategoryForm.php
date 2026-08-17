@@ -16,7 +16,7 @@ class CategoryForm
                 TextInput::make('name')
                     ->required(),
                 TextInput::make('slug')
-                    ->required(),
+                    ->required()->unique(ignoreRecord: true),
                 Textarea::make('description')
                     ->default(null)
                     ->columnSpanFull(),

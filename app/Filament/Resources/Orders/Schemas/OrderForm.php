@@ -20,7 +20,6 @@ class OrderForm
                     ->required()->disabled(),
                 Select::make('status')->options([
                     'paid' => 'Paid', 'processing' => 'Processing', 'delivered' => 'Delivered',
-                    'cancelled' => 'Cancelled', 'refunded' => 'Refunded', 'failed' => 'Failed',
                 ])->required(),
                 TextInput::make('total_paise')
                     ->required()
@@ -28,7 +27,7 @@ class OrderForm
                 TextInput::make('purchase_key')
                     ->required()->disabled(),
                 DateTimePicker::make('paid_at'),
-                DateTimePicker::make('delivered_at'),
+                DateTimePicker::make('delivered_at')->disabled(),
             ]);
     }
 }

@@ -2,8 +2,6 @@
 
 namespace App\Filament\Resources\Plans\Tables;
 
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -15,18 +13,21 @@ class PlansTable
     {
         return $table
             ->columns([
-                TextColumn::make('product_id')
-                    ->numeric()
+                TextColumn::make('product.name')
+                    ->label('Product')
+                    ->searchable()
                     ->sortable(),
                 TextColumn::make('name')
                     ->searchable(),
                 TextColumn::make('validity')
                     ->searchable(),
                 TextColumn::make('price_paise')
-                    ->numeric()
+                    ->label('Price')
+                    ->formatStateUsing(fn ($state) => '₹'.number_format($state / 100, 2))
                     ->sortable(),
                 TextColumn::make('compare_at_price_paise')
-                    ->numeric()
+                    ->label('Compare at')
+                    ->formatStateUsing(fn ($state) => $state ? '₹'.number_format($state / 100, 2) : '—')
                     ->sortable(),
                 TextColumn::make('stock')
                     ->numeric()
@@ -59,10 +60,6 @@ class PlansTable
             ->recordActions([
                 EditAction::make(),
             ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
-            ]);
+            ;
     }
 }

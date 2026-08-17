@@ -13,6 +13,10 @@ class EditOrder extends EditRecord
 
     protected function afterSave(): void
     {
+        if (! $this->record->wasChanged('status')) { return; }
+        if ($this->record->status === 'delivered' && ! $this->record->delivered_at) {
+            $this->record->updateQuietly(['delivered_at' => now()]);
+        }
         $customer = DB::table('customers')->find($this->record->customer_id);
         DB::table('audit_logs')->insert([
             'user_id' => auth()->id(), 'action' => 'order.status_changed',
