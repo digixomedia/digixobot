@@ -28,9 +28,11 @@ class PlanForm
                     ->numeric()
                     ->default(null),
                 TextInput::make('stock')
-                    ->required()
+                    ->label('Stock (blank = untracked)')
+                    ->nullable()
                     ->numeric()
-                    ->default(0),
+                    ->minValue(0)
+                    ->default(null),
                 TextInput::make('delivery_method')
                     ->default(null),
                 TextInput::make('delivery_estimate')

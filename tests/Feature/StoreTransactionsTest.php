@@ -17,7 +17,7 @@ class StoreTransactionsTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function seedStore(int $balance = 10000, int $stock = 2): array
+    private function seedStore(int $balance = 10000, ?int $stock = 2): array
     {
         $now = now();
         $customerId = DB::table('customers')->insertGetId([
@@ -79,6 +79,19 @@ class StoreTransactionsTest extends TestCase
         $orderId = app(PurchaseService::class)->purchase($customerId, $planId, 'deal-purchase');
         $this->assertDatabaseHas('orders', ['id' => $orderId, 'total_paise' => 1800]);
         $this->assertDatabaseHas('customers', ['id' => $customerId, 'wallet_balance_paise' => 8200]);
+    }
+
+    public function test_untracked_inventory_can_be_purchased_and_refunded_without_a_fake_stock_count(): void
+    {
+        Http::fake();
+        [$customerId, $planId] = $this->seedStore(stock: null);
+        $order = Order::find(app(PurchaseService::class)->purchase($customerId, $planId, 'untracked-stock'));
+
+        $this->assertDatabaseHas('plans', ['id' => $planId, 'stock' => null]);
+
+        app(RefundService::class)->refund($order, 'Approved test refund', null);
+
+        $this->assertDatabaseHas('plans', ['id' => $planId, 'stock' => null]);
     }
 
     public function test_wallet_adjustments_are_ledgered_and_never_make_balance_negative(): void

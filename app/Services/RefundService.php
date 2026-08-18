@@ -28,7 +28,7 @@ class RefundService
             ]);
             DB::table('orders')->where('id', $lockedOrder->id)->update(['status' => 'refunded', 'updated_at' => now()]);
             foreach (DB::table('order_items')->where('order_id', $lockedOrder->id)->get() as $item) {
-                DB::table('plans')->where('id', $item->plan_id)->increment('stock', $item->quantity);
+                DB::table('plans')->where('id', $item->plan_id)->whereNotNull('stock')->increment('stock', $item->quantity);
             }
             DB::table('wallet_transactions')->insert([
                 'customer_id' => $customer->id, 'order_id' => $lockedOrder->id, 'type' => 'refund_credit',

@@ -13,7 +13,7 @@ class StoreOverview extends StatsOverviewWidget
         $todayOrders = DB::table('orders')->whereDate('created_at', today())->count();
         $todayRevenue = DB::table('orders')->whereDate('created_at', today())->whereNotIn('status', ['refunded', 'failed', 'cancelled'])->sum('total_paise');
         $walletLiability = DB::table('customers')->sum('wallet_balance_paise');
-        $lowStock = DB::table('plans')->where('is_active', true)->where('stock', '<=', 5)->count();
+        $lowStock = DB::table('plans')->where('is_active', true)->whereNotNull('stock')->where('stock', '<=', 5)->count();
 
         return [
             Stat::make('Orders today', number_format($todayOrders)),

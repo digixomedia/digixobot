@@ -170,7 +170,7 @@ class TelegramWebhookController extends Controller
             return;
         }
         if ($data === 'deals') {
-            $deals = DB::table('deals')->join('plans', 'plans.id', '=', 'deals.plan_id')->join('products', 'products.id', '=', 'plans.product_id')->where('deals.is_active', true)->where('plans.is_active', true)->where('products.is_active', true)->where('plans.stock', '>', 0)->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', now()))->where(fn ($q) => $q->whereNull('ends_at')->orWhere('ends_at', '>=', now()))->select('deals.*', 'plans.name as plan_name', 'products.name as product_name')->limit(10)->get();
+            $deals = DB::table('deals')->join('plans', 'plans.id', '=', 'deals.plan_id')->join('products', 'products.id', '=', 'plans.product_id')->where('deals.is_active', true)->where('plans.is_active', true)->where('products.is_active', true)->where(fn ($q) => $q->whereNull('plans.stock')->orWhere('plans.stock', '>', 0))->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', now()))->where(fn ($q) => $q->whereNull('ends_at')->orWhere('ends_at', '>=', now()))->select('deals.*', 'plans.name as plan_name', 'products.name as product_name')->limit(10)->get();
             $text = $deals->isEmpty() ? 'No active deals today.' : '<b>Today’s Deals</b>\n\n'.$deals->map(fn ($deal) => '• '.TelegramBot::escape($deal->title).' — ₹'.number_format($deal->deal_price_paise / 100, 2))->implode("\n");
             $buttons = $deals->map(fn ($deal) => [['text' => '🎯 '.$deal->product_name.' · ₹'.number_format($deal->deal_price_paise / 100, 2), 'callback_data' => 'plan:'.$deal->plan_id]])->all();
             $buttons[] = [['text' => '⌂ Main Menu', 'callback_data' => 'home']];
@@ -200,8 +200,8 @@ class TelegramWebhookController extends Controller
         if (preg_match('/^product:(\d+)$/', $data, $matches)) {
             $product = DB::table('products')->find($matches[1]);
             $plans = DB::table('plans')->where('product_id', $matches[1])->where('is_active', true)->orderBy('display_order')->get();
-            $buttons = $plans->map(fn ($plan) => [['text' => "{$plan->name} • {$plan->validity} • ₹".number_format($plan->price_paise / 100, 2), 'callback_data' => 'plan:'.$plan->id]])->all();
-            $buttons[] = [['text' => '‹ Categories', 'callback_data' => 'categories'], ['text' => '⌂ Main Menu', 'callback_data' => 'home']];
+            $buttons = $plans->map(fn ($plan) => [['text' => "Select {$plan->name} • {$plan->validity} • ₹".number_format($plan->price_paise / 100, 2), 'callback_data' => 'plan:'.$plan->id]])->all();
+            $buttons[] = [['text' => '‹ Back', 'callback_data' => 'category:'.$product->category_id], ['text' => '⌂ Home', 'callback_data' => 'home']];
             $bot->sendMessage($chatId, '<b>'.TelegramBot::escape($product->name).'</b>\n<blockquote>'.TelegramBot::escape($product->description ?? '').'</blockquote>\nSelect the plan that matches your requirement.', $buttons);
             return;
         }
@@ -211,35 +211,40 @@ class TelegramWebhookController extends Controller
                 $bot->sendMessage($chatId, 'This plan is no longer available.', [[['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
                 return;
             }
-            $text = '<b>'.TelegramBot::escape($plan->product_name).' — '.TelegramBot::escape($plan->name).'</b>'
-                ."\n<blockquote>".TelegramBot::escape($plan->validity)." plan</blockquote>"
-                ."\n<b>Validity:</b> ".TelegramBot::escape($plan->validity)
-                ."\n<b>Delivery:</b> ".TelegramBot::escape($plan->delivery_estimate ?: 'Contact support')
-                ."\n<b>Activation:</b> ".TelegramBot::escape($plan->activation_method ?: 'Provided after purchase')
-                ."\n<b>Warranty:</b> ".TelegramBot::escape($plan->warranty ?: 'As stated by seller')
-                ."\n<b>Price:</b> ₹".number_format($this->effectivePrice((int) $plan->id, (int) $plan->price_paise) / 100, 2)
-                ."\n<b>Stock:</b> ".($plan->stock > 0 ? $plan->stock.' available' : 'Sold out');
+            $lines = [
+                '<b>'.TelegramBot::escape($plan->product_name).' — '.TelegramBot::escape($plan->name).'</b>',
+                '<b>Price:</b> ₹'.number_format($this->effectivePrice((int) $plan->id, (int) $plan->price_paise) / 100, 2),
+                '<b>Validity:</b> '.TelegramBot::escape($plan->validity),
+            ];
+            if ($plan->delivery_estimate) { $lines[] = '<b>Delivery:</b> '.TelegramBot::escape($plan->delivery_estimate); }
+            if ($plan->activation_method) { $lines[] = '<b>Activation:</b> '.TelegramBot::escape($plan->activation_method); }
+            if ($plan->warranty) { $lines[] = '<b>Warranty:</b> '.TelegramBot::escape($plan->warranty); }
+            $lines[] = '<b>Availability:</b> '.($plan->stock === null || $plan->stock > 0 ? 'Available' : 'Sold out');
+            $text = implode("\n", $lines);
             $bot->sendMessage($chatId, $text, [
                 [['text' => '⚡ Buy Now', 'callback_data' => 'buy:'.$plan->id]],
                 [['text' => '📋 Full Details', 'callback_data' => 'details:'.$plan->id], ['text' => '💬 Ask a Question', 'callback_data' => 'ask:'.$plan->id]],
-                [['text' => '‹ Other Plans', 'callback_data' => 'product:'.$plan->product_id], ['text' => '⌂ Main Menu', 'callback_data' => 'home']],
+                [['text' => '‹ Back', 'callback_data' => 'product:'.$plan->product_id], ['text' => '⌂ Home', 'callback_data' => 'home']],
             ]);
             return;
         }
         if (preg_match('/^details:(\d+)$/', $data, $matches)) {
             $plan = DB::table('plans')->join('products', 'products.id', '=', 'plans.product_id')->select('plans.*', 'products.name as product_name', 'products.description as product_description')->where('plans.id', $matches[1])->first();
             if (! $plan) { return; }
-            $text = '<b>'.TelegramBot::escape($plan->product_name).' — '.TelegramBot::escape($plan->name).'</b>'
-                .'\n\n<blockquote>'.TelegramBot::escape($plan->product_description ?: 'Digital product plan.').'</blockquote>'
-                .'\n<b>Validity:</b> '.TelegramBot::escape($plan->validity)
-                .'\n<b>Delivery method:</b> '.TelegramBot::escape($plan->delivery_method ?: 'Contact support')
-                .'\n<b>Delivery estimate:</b> '.TelegramBot::escape($plan->delivery_estimate ?: 'Contact support')
-                .'\n<b>Activation:</b> '.TelegramBot::escape($plan->activation_method ?: 'Provided after purchase')
-                .'\n<b>Warranty:</b> '.TelegramBot::escape($plan->warranty ?: 'As stated by seller')
-                .'\n<b>Stock:</b> '.($plan->stock > 0 ? $plan->stock.' available' : 'Sold out')
-                .'\n<b>Conditions:</b> '.TelegramBot::escape($plan->conditions ?: 'No additional conditions.')
-                .'\n<b>Price:</b> ₹'.number_format($this->effectivePrice((int) $plan->id, (int) $plan->price_paise) / 100, 2);
-            $bot->sendMessage($chatId, $text, [[['text' => '⚡ Buy Now', 'callback_data' => 'buy:'.$plan->id]], [['text' => '‹ Plan', 'callback_data' => 'plan:'.$plan->id], ['text' => '⌂ Main Menu', 'callback_data' => 'home']]]);
+            $lines = [
+                '<b>'.TelegramBot::escape($plan->product_name).' — '.TelegramBot::escape($plan->name).'</b>',
+                '<b>Price:</b> ₹'.number_format($this->effectivePrice((int) $plan->id, (int) $plan->price_paise) / 100, 2),
+                '',
+                '<blockquote>'.TelegramBot::escape($plan->product_description ?: 'Digital product plan.').'</blockquote>',
+                '<b>Validity:</b> '.TelegramBot::escape($plan->validity),
+            ];
+            if ($plan->delivery_method) { $lines[] = '<b>Delivery method:</b> '.TelegramBot::escape($plan->delivery_method); }
+            if ($plan->delivery_estimate) { $lines[] = '<b>Delivery estimate:</b> '.TelegramBot::escape($plan->delivery_estimate); }
+            if ($plan->activation_method) { $lines[] = '<b>Activation:</b> '.TelegramBot::escape($plan->activation_method); }
+            if ($plan->warranty) { $lines[] = '<b>Warranty:</b> '.TelegramBot::escape($plan->warranty); }
+            if ($plan->conditions) { $lines[] = '<b>Conditions:</b> '.TelegramBot::escape($plan->conditions); }
+            $lines[] = '<b>Availability:</b> '.($plan->stock === null || $plan->stock > 0 ? 'Available' : 'Sold out');
+            $bot->sendMessage($chatId, implode("\n", $lines), [[['text' => '⚡ Buy Now', 'callback_data' => 'buy:'.$plan->id]], [['text' => '‹ Back', 'callback_data' => 'plan:'.$plan->id], ['text' => '⌂ Home', 'callback_data' => 'home']]]);
             return;
         }
         if (preg_match('/^ask:(\d+)$/', $data, $matches)) {

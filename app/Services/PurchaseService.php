@@ -19,7 +19,7 @@ class PurchaseService
             $customer = DB::table('customers')->lockForUpdate()->find($customerId);
             $plan = DB::table('plans')->lockForUpdate()->find($planId);
             $product = $plan ? DB::table('products')->find($plan->product_id) : null;
-            if (! $customer || ! $plan || ! $product || ! $plan->is_active || ! $product->is_active || $plan->stock < 1) {
+            if (! $customer || ! $plan || ! $product || ! $plan->is_active || ! $product->is_active || ($plan->stock !== null && $plan->stock < 1)) {
                 throw new RuntimeException('This plan is no longer available.');
             }
             $dealPrice = DB::table('deals')->where('plan_id', $planId)->where('is_active', true)
@@ -48,7 +48,9 @@ class PurchaseService
                 'total_spend_paise' => $customer->total_spend_paise + $price,
                 'updated_at' => now(),
             ]);
-            DB::table('plans')->where('id', $planId)->decrement('stock');
+            if ($plan->stock !== null) {
+                DB::table('plans')->where('id', $planId)->decrement('stock');
+            }
             DB::table('wallet_transactions')->insert([
                 'customer_id' => $customerId, 'order_id' => $orderId, 'type' => 'purchase_debit',
                 'amount_paise' => -$price, 'balance_after_paise' => $newBalance,
