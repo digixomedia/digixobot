@@ -30,6 +30,7 @@ class PlansTable
                     ->formatStateUsing(fn ($state) => $state ? '₹'.number_format($state / 100, 2) : '—')
                     ->sortable(),
                 TextColumn::make('stock')
+                    ->placeholder('Untracked')
                     ->formatStateUsing(fn ($state) => $state === null ? 'Untracked' : number_format($state))
                     ->sortable(),
                 TextColumn::make('delivery_method')
