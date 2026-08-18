@@ -8,6 +8,10 @@ return [
         'admin_chat_id' => env('TELEGRAM_ADMIN_CHAT_ID'),
     ],
 
+    'catalog_sync' => [
+        'token' => env('CATALOG_SYNC_TOKEN'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

@@ -2,14 +2,12 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Category;
-use App\Models\Plan;
-use App\Models\Product;
+use App\Services\CatalogSyncService;
+use App\Support\DigiXOCatalog;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
-use Throwable;
 
 class ImportDigiXOCatalog extends Command
 {
@@ -21,10 +19,10 @@ class ImportDigiXOCatalog extends Command
 
     public function handle(): int
     {
-        $catalog = require database_path('data/digixo_catalog.php');
-        $productCount = array_sum(array_map(fn (array $category): int => count($category['products']), $catalog));
+        $categories = DigiXOCatalog::payload()['categories'];
+        $productCount = array_sum(array_map(fn (array $category): int => count($category['products']), $categories));
 
-        if (count($catalog) !== 6 || $productCount !== 34) {
+        if (count($categories) !== 6 || $productCount !== 34) {
             throw new RuntimeException('Catalog source must contain exactly 6 categories and 34 products.');
         }
 
@@ -36,116 +34,22 @@ class ImportDigiXOCatalog extends Command
             $this->info("Backup: {$backupPath}");
         }
 
-        $stats = [
-            'categories' => ['total' => 0, 'created' => 0, 'updated' => 0, 'unchanged' => 0],
-            'products' => ['total' => 0, 'created' => 0, 'updated' => 0, 'unchanged' => 0],
-            'plans' => ['total' => 0, 'created' => 0, 'updated' => 0, 'unchanged' => 0],
-        ];
-
-        DB::beginTransaction();
-
-        try {
-            foreach ($catalog as $categoryData) {
-                $category = Category::query()->where('slug', $categoryData['slug'])->lockForUpdate()->first()
-                    ?? new Category(['slug' => $categoryData['slug']]);
-
-                $this->saveAndCount($category, [
-                    'name' => $categoryData['name'],
-                    'description' => null,
-                    'display_order' => $categoryData['display_order'],
-                    'is_active' => true,
-                ], $stats['categories']);
-
-                foreach ($categoryData['products'] as $productOrder => $productData) {
-                    $product = Product::query()->where('slug', $productData['slug'])->lockForUpdate()->first()
-                        ?? new Product(['slug' => $productData['slug']]);
-
-                    $this->saveAndCount($product, [
-                        'category_id' => $category->id,
-                        'name' => $productData['name'],
-                        'description' => $productData['description'],
-                        'is_active' => true,
-                        'is_featured' => false,
-                        'is_deal' => false,
-                        'display_order' => $productOrder + 1,
-                    ], $stats['products']);
-
-                    $plan = Plan::query()
-                        ->where('product_id', $product->id)
-                        ->where('name', $productData['plan'])
-                        ->lockForUpdate()
-                        ->first();
-
-                    if (! $plan) {
-                        $existingPlanIds = Plan::query()->where('product_id', $product->id)->lockForUpdate()->pluck('id');
-                        $replaceablePlanId = $existingPlanIds->count() === 1 ? $existingPlanIds->first() : null;
-                        $plan = $replaceablePlanId && ! DB::table('order_items')->where('plan_id', $replaceablePlanId)->exists()
-                            ? Plan::find($replaceablePlanId)
-                            : null;
-                    }
-
-                    $plan ??= new Plan([
-                        'product_id' => $product->id,
-                    ]);
-
-                    $this->saveAndCount($plan, [
-                        'name' => $productData['plan'],
-                        'validity' => $productData['validity'],
-                        'price_paise' => $productData['price_rupees'] * 100,
-                        'compare_at_price_paise' => null,
-                        'stock' => null,
-                        'delivery_method' => null,
-                        'delivery_estimate' => null,
-                        'activation_method' => null,
-                        'warranty' => null,
-                        'conditions' => null,
-                        'is_active' => true,
-                        'display_order' => 1,
-                    ], $stats['plans']);
-                }
-            }
-
-            if ($dryRun) {
-                DB::rollBack();
-            } else {
-                DB::commit();
-            }
-        } catch (Throwable $exception) {
-            if (DB::transactionLevel() > 0) {
-                DB::rollBack();
-            }
-
-            throw $exception;
-        }
+        $result = app(CatalogSyncService::class)->sync($categories, $dryRun);
 
         $this->table(
             ['Entity', 'Processed', 'Created', 'Updated', 'Unchanged'],
-            collect($stats)->map(fn (array $values, string $entity): array => [
+            collect($result['entities'])->map(fn (array $values, string $entity): array => [
                 ucfirst($entity),
-                $values['total'],
+                array_sum($values),
                 $values['created'],
                 $values['updated'],
-                $values['unchanged'],
+                $values['skipped'],
             ])->values()->all(),
         );
         $this->line('Demo records deactivated: 0');
         $this->info($dryRun ? 'Dry run complete; all database changes were rolled back.' : 'Catalog import complete.');
 
         return self::SUCCESS;
-    }
-
-    private function saveAndCount(Category|Product|Plan $model, array $attributes, array &$stats): void
-    {
-        $exists = $model->exists;
-        $model->fill($attributes);
-        $changed = ! $exists || $model->isDirty();
-
-        if ($changed) {
-            $model->save();
-        }
-
-        $stats['total']++;
-        $stats[$exists ? ($changed ? 'updated' : 'unchanged') : 'created']++;
     }
 
     private function backupCatalog(): string
